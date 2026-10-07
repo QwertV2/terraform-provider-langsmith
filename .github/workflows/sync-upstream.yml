@@ -1,0 +1,86 @@
+# Keeps this fork's main branch in sync with upstream and builds it with
+# upstream's version tag plus a "-qw" suffix (e.g. upstream v1.2.3 -> 1.2.3-qw).
+#
+# GitHub Actions cannot react to push events on a repo it doesn't own, so this
+# polls upstream/main on a schedule instead of triggering on upstream's push.
+name: Sync upstream and build
+
+on:
+  schedule:
+    # 07:00 UTC = 09:00 Europe/Rome in CEST (summer); 08:00 in CET (winter),
+    # since GitHub Actions cron runs in UTC and doesn't shift for DST.
+    - cron: '0 7 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  UPSTREAM_URL: https://github.com/bogware/terraform-provider-langsmith.git
+
+jobs:
+  sync-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream main
+
+      - name: Check for new upstream commits
+        id: diff
+        run: |
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "new_commits=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_commits=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge upstream/main
+        if: steps.diff.outputs.new_commits == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if ! git merge --no-edit upstream/main; then
+            git merge --abort
+            echo "::error::Merge from upstream/main produced conflicts. Resolve manually; main was left untouched."
+            exit 1
+          fi
+
+      - name: Push merged main
+        if: steps.diff.outputs.new_commits == 'true'
+        run: git push origin HEAD:main
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        if: steps.diff.outputs.new_commits == 'true'
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Determine version
+        if: steps.diff.outputs.new_commits == 'true'
+        id: version
+        run: |
+          latest_tag=$(git ls-remote --tags --refs "$UPSTREAM_URL" \
+            | awk '{print $2}' | sed 's#refs/tags/##' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V | tail -n1)
+          if [ -z "$latest_tag" ]; then
+            echo "::error::No semver tag (vX.Y.Z) found on upstream."
+            exit 1
+          fi
+          version="${latest_tag#v}-qw"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $version"
+
+      - name: Build
+        if: steps.diff.outputs.new_commits == 'true'
+        run: go build -trimpath -ldflags "-X main.version=${{ steps.version.outputs.version }}" -o /tmp/terraform-provider-langsmith .
+
+      - name: Unit tests
+        if: steps.diff.outputs.new_commits == 'true'
+        run: make test
