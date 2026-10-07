@@ -43,17 +43,17 @@ type ModelPriceMapResource struct {
 // name, regex match pattern, per-token costs, provider, and optional match paths.
 // Note: "provider" is a reserved word in Terraform, so we use "model_provider" in the schema.
 type ModelPriceMapResourceModel struct {
-	ID                    types.String  `tfsdk:"id"`
-	Name                  types.String  `tfsdk:"name"`
-	MatchPattern          types.String  `tfsdk:"match_pattern"`
-	PromptCost            types.Float64 `tfsdk:"prompt_cost"`
-	CompletionCost        types.Float64 `tfsdk:"completion_cost"`
-	Provider              types.String  `tfsdk:"model_provider"`
-	StartTime             types.String  `tfsdk:"start_time"`
-	MatchPath             types.List    `tfsdk:"match_path"`
-	PromptCostDetails     types.String  `tfsdk:"prompt_cost_details"`
-	CompletionCostDetails types.String  `tfsdk:"completion_cost_details"`
-	WorkspaceID           types.String  `tfsdk:"workspace_id"`
+	ID                    types.String     `tfsdk:"id"`
+	Name                  types.String     `tfsdk:"name"`
+	MatchPattern          types.String     `tfsdk:"match_pattern"`
+	PromptCost            types.Float64    `tfsdk:"prompt_cost"`
+	CompletionCost        types.Float64    `tfsdk:"completion_cost"`
+	Provider              types.String     `tfsdk:"model_provider"`
+	StartTime             types.String     `tfsdk:"start_time"`
+	MatchPath             types.List       `tfsdk:"match_path"`
+	PromptCostDetails     jsonNumericValue `tfsdk:"prompt_cost_details"`
+	CompletionCostDetails jsonNumericValue `tfsdk:"completion_cost_details"`
+	WorkspaceID           types.String     `tfsdk:"workspace_id"`
 }
 
 // modelPriceMapAPIRequest is the request body for creating/updating a model price map.
@@ -135,10 +135,12 @@ func (r *ModelPriceMapResource) Schema(ctx context.Context, req resource.SchemaR
 			"prompt_cost_details": schema.StringAttribute{
 				MarkdownDescription: "JSON-encoded cost details object for prompt tokens — the fine print on what you owe.",
 				Optional:            true,
+				CustomType:          jsonNumericType{},
 			},
 			"completion_cost_details": schema.StringAttribute{
 				MarkdownDescription: "JSON-encoded cost details object for completion tokens — every last cent accounted for.",
 				Optional:            true,
+				CustomType:          jsonNumericType{},
 			},
 			"workspace_id": schema.StringAttribute{
 				MarkdownDescription: "If set, overrides the provider-level `workspace_id` for all API calls made by this resource.",
@@ -359,6 +361,18 @@ func mapModelPriceMapResponseToState(ctx context.Context, data *ModelPriceMapRes
 		data.MatchPath = types.ListNull(types.StringType)
 	}
 
-	data.PromptCostDetails = jsonPreserveConfigSubset(result.PromptCostDetails, data.PromptCostDetails)
-	data.CompletionCostDetails = jsonPreserveConfigSubset(result.CompletionCostDetails, data.CompletionCostDetails)
+	data.PromptCostDetails = normalizedJSONValue(result.PromptCostDetails)
+	data.CompletionCostDetails = normalizedJSONValue(result.CompletionCostDetails)
+}
+
+// normalizedJSONValue converts a JSON API response field into a
+// jsonNumericValue. Unlike a plain types.String, its plan-time equality
+// check compares parsed JSON rather than bytes, so formatting differences
+// between the API's encoder and Terraform's jsonencode() (e.g. "1e-07" vs
+// "0.0000001" for the same float) never show up as a diff.
+func normalizedJSONValue(raw json.RawMessage) jsonNumericValue {
+	if len(raw) == 0 || string(raw) == "null" {
+		return newJSONNumericNull()
+	}
+	return newJSONNumericValue(string(raw))
 }
