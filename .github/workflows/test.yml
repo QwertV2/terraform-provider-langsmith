@@ -77,6 +77,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+      LANGSMITH_WORKSPACE_ID: ${{ secrets.LANGSMITH_WORKSPACE_ID }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
@@ -88,9 +91,7 @@ jobs:
           terraform_wrapper: false
       - run: go mod download
       - name: Run acceptance tests
-        if: ${{ secrets.LANGSMITH_API_KEY != '' }}
+        if: ${{ env.LANGSMITH_API_KEY != '' }}
         env:
           TF_ACC: "1"
-          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-          LANGSMITH_WORKSPACE_ID: ${{ secrets.LANGSMITH_WORKSPACE_ID }}
         run: go test -v -cover -timeout 30m ./internal/provider/
