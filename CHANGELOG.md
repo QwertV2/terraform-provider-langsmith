@@ -1,3 +1,10 @@
+## 1.2.2 (Unreleased)
+
+BUG FIXES:
+
+* `langsmith_model_price_map`'s `match_path` was schema'd `Optional` without `Computed`, so omitting it from configuration and letting the API apply its server-side default produced "Provider produced inconsistent result after apply" on every create. `match_path` is now `Optional` and `Computed` with `UseStateForUnknown`, matching the pattern already used for `id` and `workspace_id` on this resource. ([#89](https://github.com/bogware/terraform-provider-langsmith/issues/89))
+* `langsmith_model_price_map`'s `prompt_cost_details` / `completion_cost_details` never converged. The API reformats JSON-encoded floats (`1e-07` instead of HCL `jsonencode`'s `0.0000001`), and `Read` wrote the API's reformatted JSON directly into state on every refresh, producing a diff that reapplying never cleared. Both attributes now go through `jsonPreserveConfigSubset`, the same JSON-equality helper already used elsewhere in the provider, which compares parsed values rather than formatted strings and keeps the configured spelling when it's semantically unchanged. ([#90](https://github.com/bogware/terraform-provider-langsmith/issues/90))
+
 ## 1.2.1 (September 2026)
 
 BUG FIXES:

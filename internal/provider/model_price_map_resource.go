@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -125,7 +126,11 @@ func (r *ModelPriceMapResource) Schema(ctx context.Context, req resource.SchemaR
 			"match_path": schema.ListAttribute{
 				MarkdownDescription: "Paths to match for model identification. Defaults to `[\"model\", \"model_name\", \"model_id\", \"model_path\", \"endpoint_name\"]`.",
 				Optional:            true,
+				Computed:            true,
 				ElementType:         types.StringType,
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"prompt_cost_details": schema.StringAttribute{
 				MarkdownDescription: "JSON-encoded cost details object for prompt tokens — the fine print on what you owe.",
@@ -203,10 +208,6 @@ func (r *ModelPriceMapResource) Create(ctx context.Context, req resource.CreateR
 		body.CompletionCostDetails = json.RawMessage(data.CompletionCostDetails.ValueString())
 	}
 
-	// Preserve plan values; the API may normalize or expand JSON fields.
-	planPromptCostDetails := data.PromptCostDetails
-	planCompletionCostDetails := data.CompletionCostDetails
-
 	var result modelPriceMapAPIResponse
 	err := effectiveClient(r.client, data.WorkspaceID).Post(ctx, "/api/v1/model-price-map", body, &result)
 	if err != nil {
@@ -215,8 +216,6 @@ func (r *ModelPriceMapResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	mapModelPriceMapResponseToState(ctx, &data, &result, &resp.Diagnostics)
-	data.PromptCostDetails = planPromptCostDetails
-	data.CompletionCostDetails = planCompletionCostDetails
 	reconcileWorkspaceID(&data.WorkspaceID, "", &resp.Diagnostics)
 	tflog.Trace(ctx, "created model price map resource", map[string]interface{}{"id": result.ID})
 
@@ -298,10 +297,6 @@ func (r *ModelPriceMapResource) Update(ctx context.Context, req resource.UpdateR
 		body.CompletionCostDetails = json.RawMessage(data.CompletionCostDetails.ValueString())
 	}
 
-	// Preserve plan values; the API may normalize or expand JSON fields.
-	planPromptCostDetails := data.PromptCostDetails
-	planCompletionCostDetails := data.CompletionCostDetails
-
 	var result modelPriceMapAPIResponse
 	err := effectiveClient(r.client, data.WorkspaceID).Put(ctx, "/api/v1/model-price-map/"+data.ID.ValueString(), body, &result)
 	if err != nil {
@@ -310,8 +305,6 @@ func (r *ModelPriceMapResource) Update(ctx context.Context, req resource.UpdateR
 	}
 
 	mapModelPriceMapResponseToState(ctx, &data, &result, &resp.Diagnostics)
-	data.PromptCostDetails = planPromptCostDetails
-	data.CompletionCostDetails = planCompletionCostDetails
 	tflog.Trace(ctx, "updated model price map resource", map[string]interface{}{"id": result.ID})
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
@@ -366,6 +359,6 @@ func mapModelPriceMapResponseToState(ctx context.Context, data *ModelPriceMapRes
 		data.MatchPath = types.ListNull(types.StringType)
 	}
 
-	data.PromptCostDetails = jsonStringValue(result.PromptCostDetails)
-	data.CompletionCostDetails = jsonStringValue(result.CompletionCostDetails)
+	data.PromptCostDetails = jsonPreserveConfigSubset(result.PromptCostDetails, data.PromptCostDetails)
+	data.CompletionCostDetails = jsonPreserveConfigSubset(result.CompletionCostDetails, data.CompletionCostDetails)
 }
